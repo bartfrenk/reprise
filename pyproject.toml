@@ -1,0 +1,30 @@
+[project]
+name = "songbook"
+version = "0.1.0"
+description = "Tools for building ChordPro songbooks from Org files"
+readme = "README.md"
+authors = [
+    { name = "Bart Frenk", email = "bart.frenk@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+songbook = "songbook.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 99
+
+[tool.isort]
+profile = "black"
+line_length = 99
+
+[tool.pyright]
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownLambdaType = false
+reportImplicitStringConcatenation = false
