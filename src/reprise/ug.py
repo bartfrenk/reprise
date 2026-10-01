@@ -13,17 +13,19 @@ chord that ChordPro does not know yet, using the voicing shown on the page.
 
 from __future__ import annotations
 
-import json
+import asyncio
 import re
 import sys
 from argparse import ArgumentParser, Namespace
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
-from typing import Any
-from urllib.request import Request, urlopen
+from typing import Annotated, TextIO
+
+import aiohttp
+from pydantic import BaseModel, BeforeValidator
 
 from reprise.brazile import CONFIG, unknown_chords, update_config
 
@@ -65,44 +67,91 @@ def create_parser() -> ArgumentParser:
 # ---------------------------------------------------------------- Page parsing
 
 
-def fetch(source: str) -> str:
+async def fetch(source: str) -> str:
     if re.match(r"https?://", source):
-        request = Request(source, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(request) as response:  # pyright: ignore[reportAny]
-            data: bytes = response.read()  # pyright: ignore[reportAny]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with (
+            aiohttp.ClientSession(headers=headers, raise_for_status=True) as session,
+            session.get(source) as response,
+        ):
+            data = await response.read()
         return data.decode("utf-8", errors="replace")
     return Path(source).read_text()
 
 
-@dataclass
+def empty_as_none(value: object) -> object:
+    """The store encodes missing objects as empty lists (PHP's json_encode of [])."""
+    return value or None
+
+
+class Fingering(BaseModel):
+    # Absolute frets from the high E string: -1 is muted, 0 is open.
+    frets: list[int]
+
+
+class Tab(BaseModel):
+    song_name: str
+    artist_name: str
+    tonality_name: str | None = None
+
+
+class WikiTab(BaseModel):
+    content: str
+
+
+class Meta(BaseModel):
+    capo: Annotated[int | None, BeforeValidator(empty_as_none)] = None
+
+
+class TabView(BaseModel):
+    wiki_tab: WikiTab
+    # Chord name -> UG voicings, the first being the one shown on the page.
+    applicature: Annotated[dict[str, list[Fingering]] | None, BeforeValidator(empty_as_none)] = (
+        None
+    )
+    meta: Annotated[Meta | None, BeforeValidator(empty_as_none)] = None
+
+
+class PageData(BaseModel):
+    tab: Tab
+    tab_view: TabView
+
+
+class StorePage(BaseModel):
+    data: PageData
+
+
+class Store(BaseModel):
+    page: StorePage
+
+
+class JsStore(BaseModel):
+    store: Store
+
+
+@dataclass(frozen=True, slots=True)
 class Page:
     title: str
     artist: str
     capo: int
     key: str
     content: str
-    # Chord name -> UG voicings, the first being the one shown on the page.
-    applicature: dict[str, list[dict[str, Any]]]
+    applicature: dict[str, list[Fingering]]
 
 
 def parse_page(html: str) -> Page:
     m = re.search(r'class="js-store" data-content="([^"]*)"', html)
     if m is None:
         sys.exit("No song data (js-store) found on the page")
-    data = json.loads(unescape(m[1]))["store"]["page"]["data"]  # pyright: ignore[reportAny]
-    tab = data["tab"]  # pyright: ignore[reportAny]
-    view = data["tab_view"]  # pyright: ignore[reportAny]
-    applicature: dict[str, list[dict[str, Any]]] = (
-        view.get("applicature") or {}
-    )  # pyright: ignore[reportAny]
-    meta: dict[str, Any] = view.get("meta") or {}  # pyright: ignore[reportAny]
+    data = JsStore.model_validate_json(unescape(m[1])).store.page.data
+    view = data.tab_view
     return Page(
-        title=tab["song_name"],  # pyright: ignore[reportAny]
-        artist=tab["artist_name"],  # pyright: ignore[reportAny]
-        capo=int(meta.get("capo") or 0),  # pyright: ignore[reportAny]
-        key=tab.get("tonality_name") or "",  # pyright: ignore[reportAny]
-        content=view["wiki_tab"]["content"],  # pyright: ignore[reportAny]
-        applicature=applicature,
+        title=data.tab.song_name,
+        artist=data.tab.artist_name,
+        capo=(view.meta.capo or 0) if view.meta else 0,
+        key=data.tab.tonality_name or "",
+        content=view.wiki_tab.content,
+        applicature=view.applicature or {},
     )
 
 
@@ -162,7 +211,8 @@ def body_lines(content: str) -> Iterator[str]:
         if m := HEADER.match(line.strip()):
             if section is not None:
                 yield f"{{end_of_{section}}}"
-            name, number = m["name"].strip(), m["number"]
+            name: str = m["name"].strip()
+            number: str | None = m["number"]
             section = SECTIONS.get(name.lower())
             if section is not None:
                 yield f"{{start_of_{section} {number}}}" if number else f"{{start_of_{section}}}"
@@ -207,9 +257,9 @@ def render(source: str, page: Page) -> Iterator[str]:
 # ------------------------------------------------------------- Config update
 
 
-def config_entry(name: str, voicing: dict[str, Any]) -> str:
+def config_entry(name: str, fingering: Fingering) -> str:
     """UG frets are absolute and listed from the high E string; ChordPro wants low E first."""
-    frets: list[int] = list(reversed(voicing["frets"]))  # pyright: ignore[reportAny]
+    frets = list(reversed(fingering.frets))
     fretted = [f for f in frets if f > 0]
     base = min(fretted) if fretted and max(fretted) > 4 else 1
     rel = " ".join("x" if f < 0 else "0" if f == 0 else str(f - base + 1) for f in frets)
@@ -217,11 +267,11 @@ def config_entry(name: str, voicing: dict[str, Any]) -> str:
 
 
 @contextmanager
-def out(path: Path | None, mode: str = "wt"):
+def out(path: Path | None) -> Generator[TextIO]:
     if not path:
         yield sys.stdout
     else:
-        with open(path, mode) as fh:
+        with open(path, "w") as fh:
             yield fh
 
 
@@ -229,7 +279,7 @@ def run(args: Namespace) -> None:
     source: str = args.source  # pyright: ignore[reportAny]
     config: Path = args.config  # pyright: ignore[reportAny]
 
-    page = parse_page(fetch(source))
+    page = parse_page(asyncio.run(fetch(source)))
     cho = "\n".join(render(source, page)) + "\n"
     with out(args.output) as fh:  # pyright: ignore[reportAny]
         fh.write(cho)

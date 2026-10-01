@@ -4,6 +4,6 @@ install:
 	uv tool install --force --editable .
 
 lint:
-	black --check src
-	isort --check-only src
-	pyright src
+	uv run black --check src
+	uv run isort --check-only src
+	uv run basedpyright src

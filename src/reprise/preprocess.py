@@ -1,15 +1,22 @@
 # pyright: reportUnusedCallResult = false
+"""Normalize a ChordPro file tangled from an Org songbook.
+
+Org source blocks are written for readability in the editor, so they need a
+pass before ChordPro sees them: environment markers are rewritten to the
+`{start_of_kind: name}` form and description paragraphs, hard-wrapped in Org,
+are flowed back onto single lines.
+"""
 
 from __future__ import annotations
 
 import re
 import sys
 from argparse import ArgumentParser, Namespace
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Self, override
+from typing import Literal, Self, TextIO, override
 
 
 def create_parser() -> ArgumentParser:
@@ -109,9 +116,8 @@ class State:
             yield line.removesuffix("\n")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Marker:
-
     boundary: Literal["start", "end"]
     env: Env
 
@@ -137,11 +143,11 @@ class Marker:
 
 
 @contextmanager
-def out(path: Path | None, mode: str = "wt"):
+def out(path: Path | None) -> Generator[TextIO]:
     if not path:
         yield sys.stdout
     else:
-        with open(path, mode) as fh:
+        with open(path, "w") as fh:
             yield fh
 
 

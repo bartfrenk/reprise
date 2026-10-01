@@ -12,18 +12,21 @@ does not know yet, using the voicing from the page.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from argparse import ArgumentParser, Namespace
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
-from urllib.request import Request, urlopen
+from typing import TextIO
+
+import aiohttp
 
 CONFIG = Path("chordpro.json")
 
@@ -54,12 +57,15 @@ def create_parser() -> ArgumentParser:
 # ---------------------------------------------------------------- Page parsing
 
 
-def fetch(source: str) -> str:
+async def fetch(source: str) -> str:
     if re.match(r"https?://", source):
-        # The site refuses the default Python-urllib user agent.
-        request = Request(source, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(request) as response:  # pyright: ignore[reportAny]
-            data: bytes = response.read()  # pyright: ignore[reportAny]
+        # The site refuses user agents that don't look like a browser.
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with (
+            aiohttp.ClientSession(headers=headers, raise_for_status=True) as session,
+            session.get(source) as response,
+        ):
+            data = await response.read()
     else:
         data = Path(source).read_bytes()
     try:
@@ -79,7 +85,7 @@ def html_lines(html: str) -> list[str]:
     return [line for line in lines if line]
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Metadata:
     title: str
     subtitle: str | None = None
@@ -95,22 +101,26 @@ def parse_metadata(html: str) -> Metadata:
     if not title_lines:
         title = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
         title_lines = [strip_tags(title[1]).replace("(tablature)", "").strip()] if title else ["?"]
-    meta = Metadata(title=title_lines[0])
-    if len(title_lines) > 1:
-        meta.subtitle = title_lines[1]
-
+    composer = artist = transcriber = album = None
     # The credits live in the first <center> block, after the heading.
     center = re.search(r"</h2>(.*?)</center>", html, flags=re.IGNORECASE | re.DOTALL)
     for line in html_lines(center[1]) if center else []:
         if m := re.match(r"Written by (.*)", line):
-            meta.composer = m[1]
+            composer = m[1]
         elif m := re.match(r"Performed by (.*)", line):
-            meta.artist = m[1]
+            artist = m[1]
         elif m := re.match(r"Transcribed by (.*)", line):
-            meta.transcriber = m[1]
-    if center and (album := re.search(r"<i>(.*?)</i>", center[1], flags=re.DOTALL)):
-        meta.album = " ".join(strip_tags(album[1]).split())
-    return meta
+            transcriber = m[1]
+    if center and (italic := re.search(r"<i>(.*?)</i>", center[1], flags=re.DOTALL)):
+        album = " ".join(strip_tags(italic[1]).split())
+    return Metadata(
+        title=title_lines[0],
+        subtitle=title_lines[1] if len(title_lines) > 1 else None,
+        artist=artist,
+        composer=composer,
+        album=album,
+        transcriber=transcriber,
+    )
 
 
 def pre_lines(html: str) -> list[str]:
@@ -122,7 +132,7 @@ def pre_lines(html: str) -> list[str]:
 # ------------------------------------------------------------- Diagram parsing
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Voicing:
     base: int
     # Fret per string (low E first), relative to base: None is muted, 0 is open.
@@ -133,7 +143,7 @@ class Voicing:
         return f'    {{ name: "{name}" base: {self.base} frets: [ {frets} ] }}'
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Chord:
     name: str
     voicing: Voicing
@@ -326,11 +336,11 @@ def update_config(config: Path, entries: list[str]) -> None:
 
 
 @contextmanager
-def out(path: Path | None, mode: str = "wt"):
+def out(path: Path | None) -> Generator[TextIO]:
     if not path:
         yield sys.stdout
     else:
-        with open(path, mode) as fh:
+        with open(path, "w") as fh:
             yield fh
 
 
@@ -338,7 +348,7 @@ def run(args: Namespace) -> None:
     source: str = args.source  # pyright: ignore[reportAny]
     config: Path = args.config  # pyright: ignore[reportAny]
 
-    html = fetch(source)
+    html = asyncio.run(fetch(source))
     rows = list(parse_rows(pre_lines(html)))
     if not rows:
         sys.exit(f"No chord diagrams found in {source}")
