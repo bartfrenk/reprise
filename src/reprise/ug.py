@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
-from songbook.brazile import CONFIG, unknown_chords, update_config
+from reprise.brazile import CONFIG, unknown_chords, update_config
 
 CHORD = re.compile(r"\[ch\](.*?)\[/ch\]")
 HEADER = re.compile(r"^\[(?P<name>[A-Za-z][A-Za-z -]*?)\s*(?P<number>\d+)?\]$")

@@ -1,5 +1,5 @@
 [project]
-name = "songbook"
+name = "reprise"
 version = "0.1.0"
 description = "Tools for building ChordPro songbooks from Org files"
 readme = "README.md"
@@ -10,7 +10,7 @@ requires-python = ">=3.13"
 dependencies = []
 
 [project.scripts]
-songbook = "songbook.__main__:main"
+reprise = "reprise.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

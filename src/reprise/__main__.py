@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 
-from songbook import brazile, preprocess, tangle, ug
+from reprise import brazile, preprocess, tangle, ug
 
 COMMANDS = {
     "tangle": tangle,
@@ -11,7 +11,7 @@ COMMANDS = {
 
 
 def main() -> None:
-    parser = ArgumentParser(prog="songbook", description="Tools for ChordPro songbooks")
+    parser = ArgumentParser(prog="reprise", description="Tools for ChordPro songbooks")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name, module in COMMANDS.items():
         sub = module.create_parser()

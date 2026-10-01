@@ -21,7 +21,7 @@ def create_parser() -> ArgumentParser:
 
 def run(args: Namespace) -> None:
     path: Path = args.path  # pyright: ignore[reportAny]
-    with as_file(files("songbook") / "tangle.el") as el:
+    with as_file(files("reprise") / "tangle.el") as el:
         subprocess.run(
             [
                 "emacs",
