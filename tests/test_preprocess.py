@@ -44,7 +44,9 @@ def test_reports_unmatched_end_marker(tmp_path: Path, capsys: pytest.CaptureFixt
 
     _ = list(preprocess.process(path))
 
-    assert "Invalid marker end_of_chorus" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "Invalid marker end_of_chorus" in captured.err
+    assert captured.out == ""
 
 
 def test_run_writes_output_file(tmp_path: Path) -> None:

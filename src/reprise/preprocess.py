@@ -106,7 +106,6 @@ class State:
                 yield from self.env.end()
                 self.env = None
             case _:
-                print(self)
                 print(f"Invalid marker {marker}", file=sys.stderr)
 
     def transform(self, line: str) -> Iterator[str]:
