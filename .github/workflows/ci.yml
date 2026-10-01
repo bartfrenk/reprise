@@ -18,14 +18,34 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      CHORDPRO: 6.101.0
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
       # Emacs and ChordPro run the tangle and chord-lookup integration tests.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends emacs-nox cpanminus libharfbuzz-dev pkg-config
-      # Ubuntu doesn't package ChordPro; install it from CPAN.
-      - run: sudo cpanm --notest --quiet App::Music::ChordPro
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends emacs-nox libharfbuzz0b
+      # Ubuntu doesn't package ChordPro, and building it from CPAN takes minutes, so cache
+      # the install. XS modules are tied to the Perl build, hence the Perl version in the key.
+      - id: runner
+        run: |
+          echo "image=$ImageOS" >> "$GITHUB_OUTPUT"
+          echo "perl=$(perl -e 'print $^V')" >> "$GITHUB_OUTPUT"
+      - id: chordpro-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/perl5
+          key: chordpro-${{ env.CHORDPRO }}-${{ steps.runner.outputs.image }}-perl${{ steps.runner.outputs.perl }}
+      - if: steps.chordpro-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y --no-install-recommends cpanminus libharfbuzz-dev pkg-config
+          cpanm --local-lib ~/perl5 --notest --quiet "JV/App-Music-ChordPro-${CHORDPRO}.tar.gz"
+      - run: |
+          echo "PERL5LIB=$HOME/perl5/lib/perl5" >> "$GITHUB_ENV"
+          echo "$HOME/perl5/bin" >> "$GITHUB_PATH"
+      # Fail here rather than have the ChordPro tests skip on a broken install.
+      - run: chordpro --version
       - run: uv sync --locked
       - run: make test
