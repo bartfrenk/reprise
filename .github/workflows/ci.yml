@@ -24,6 +24,8 @@ jobs:
         with:
           enable-cache: true
       # Emacs and ChordPro run the tangle and chord-lookup integration tests.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends emacs-nox chordpro
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends emacs-nox cpanminus
+      # Ubuntu doesn't package ChordPro; install it from CPAN.
+      - run: sudo cpanm --notest --quiet App::Music::ChordPro
       - run: uv sync --locked
       - run: make test
