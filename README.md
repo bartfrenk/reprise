@@ -11,3 +11,10 @@ reprise ug <url> -o song.cho                  # convert an Ultimate Guitar chord
 ```
 
 `brazile` and `ug` add unknown chords to `chordpro.json` in the current directory (override with `--config`).
+
+## Development
+
+```sh
+make lint   # black, isort and basedpyright
+make test   # pytest; the tangle and ChordPro tests are skipped without emacs and chordpro
+```
